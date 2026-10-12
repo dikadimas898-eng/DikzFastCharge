@@ -1,0 +1,45 @@
+
+name: Build Dikz FastCharge APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "DikzFastCharge_GitHubBuild_Source_v1.0.0.zip"
+      - ".github/workflows/build.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Ambil file repository
+        uses: actions/checkout@v4
+
+      - name: Siapkan Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Siapkan Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Ekstrak project
+        run: |
+          unzip -o DikzFastCharge_GitHubBuild_Source_v1.0.0.zip -d upload
+          find upload -name settings.gradle -o -name settings.gradle.kts
+
+      - name: Bangun APK
+        run: |
+          PROJECT="$(dirname "$(find upload -name settings.gradle -o -name settings.gradle.kts | head -n 1)")"
+          cd "$PROJECT"
+          gradle wrapper --gradle-version 8.7
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Simpan APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Dikz-FastCharge-APK
+          path: upload/**/build/outputs/apk/debug/*.apk
