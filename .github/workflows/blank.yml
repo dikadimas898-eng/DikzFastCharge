@@ -35,51 +35,75 @@ jobs:
         run: |
           set -e
           SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-
-          if [ ! -f "$SDKMANAGER" ]; then
-            echo "sdkmanager tidak ditemukan di Android SDK."
-            find "$ANDROID_HOME/cmdline-tools" -name sdkmanager
-            exit 1
-          fi
-
           yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses || true
-
           "$SDKMANAGER" --sdk_root="$ANDROID_HOME" \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.0"
 
-      - name: Periksa dan ekstrak project
+      - name: Ekstrak project
         shell: bash
         run: |
           set -e
-          ZIP="DikzFastCharge_GitHubBuild_Source_v1.0.0.zip"
-
-          if [ ! -f "$ZIP" ]; then
-            echo "File ZIP project tidak ditemukan!"
-            ls -la
-            exit 1
-          fi
-
-          mkdir -p upload
-          unzip -o "$ZIP" -d upload
-
-          SETTINGS="$(find upload \
-            \( -name settings.gradle -o -name settings.gradle.kts \) \
-            -print -quit)"
-
+          unzip -o DikzFastCharge_GitHubBuild_Source_v1.0.0.zip -d upload
+          SETTINGS="$(find upload \( -name settings.gradle -o -name settings.gradle.kts \) -print -quit)"
           if [ -z "$SETTINGS" ]; then
-            echo "File settings.gradle tidak ditemukan!"
-            find upload -maxdepth 4 -type f | head -100
+            echo "Project Gradle tidak ditemukan!"
             exit 1
           fi
-
           echo "PROJECT_DIR=$(dirname "$SETTINGS")" >> "$GITHUB_ENV"
 
-      - name: Siapkan Gradle
+      - name: Samakan target Java dan Kotlin
         shell: bash
         run: |
           set -e
+          cd "$PROJECT_DIR"
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          p = Path("app/build.gradle")
+          if not p.exists():
+              p = Path("app/build.gradle.kts")
+
+          if not p.exists():
+              raise SystemExit("File app/build.gradle tidak ditemukan")
+
+          s = p.read_text()
+
+          if p.suffix == ".kts":
+              java_block = '''compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }'''
+              kotlin_block = '''kotlinOptions {
+                  jvmTarget = "17"
+              }'''
+          else:
+              java_block = '''compileOptions {
+                  sourceCompatibility JavaVersion.VERSION_17
+                  targetCompatibility JavaVersion.VERSION_17
+              }'''
+              kotlin_block = '''kotlinOptions {
+                  jvmTarget = "17"
+              }'''
+
+          if "compileOptions" in s:
+              s = re.sub(r'compileOptions\s*\{[^}]*\}', java_block, s, count=1)
+          else:
+              s = re.sub(r'android\s*\{', lambda m: m.group(0) + '\n    ' + java_block, s, count=1)
+
+          if "kotlinOptions" in s:
+              s = re.sub(r'kotlinOptions\s*\{[^}]*\}', kotlin_block, s, count=1)
+          else:
+              s = re.sub(r'android\s*\{', lambda m: m.group(0) + '\n    ' + kotlin_block, s, count=1)
+
+          p.write_text(s)
+          print("Target Java dan Kotlin disetel ke 17:", p)
+          PY
+
+      - name: Siapkan Gradle
+        run: |
           sudo apt-get update
           sudo apt-get install -y gradle
           cd "$PROJECT_DIR"
