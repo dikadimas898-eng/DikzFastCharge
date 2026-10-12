@@ -8,38 +8,93 @@ on:
       - "DikzFastCharge_GitHubBuild_Source_v1.0.0.zip"
       - ".github/workflows/build.yml"
 
+permissions:
+  contents: read
+
 jobs:
   build:
+    name: membangun
     runs-on: ubuntu-latest
+
+    env:
+      ANDROID_HOME: /usr/local/lib/android/sdk
+      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
 
     steps:
       - name: Ambil file repository
         uses: actions/checkout@v4
 
       - name: Siapkan Java
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Siapkan Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Ekstrak project
+        shell: bash
         run: |
-          unzip -o DikzFastCharge_GitHubBuild_Source_v1.0.0.zip -d upload
-          find upload -name settings.gradle -o -name settings.gradle.kts
+          set -e
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+
+          if [ ! -f "$SDKMANAGER" ]; then
+            echo "sdkmanager tidak ditemukan di Android SDK."
+            find "$ANDROID_HOME/cmdline-tools" -name sdkmanager
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" --sdk_root="$ANDROID_HOME" --licenses || true
+
+          "$SDKMANAGER" --sdk_root="$ANDROID_HOME" \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+
+      - name: Periksa dan ekstrak project
+        shell: bash
+        run: |
+          set -e
+          ZIP="DikzFastCharge_GitHubBuild_Source_v1.0.0.zip"
+
+          if [ ! -f "$ZIP" ]; then
+            echo "File ZIP project tidak ditemukan!"
+            ls -la
+            exit 1
+          fi
+
+          mkdir -p upload
+          unzip -o "$ZIP" -d upload
+
+          SETTINGS="$(find upload \
+            \( -name settings.gradle -o -name settings.gradle.kts \) \
+            -print -quit)"
+
+          if [ -z "$SETTINGS" ]; then
+            echo "File settings.gradle tidak ditemukan!"
+            find upload -maxdepth 4 -type f | head -100
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$(dirname "$SETTINGS")" >> "$GITHUB_ENV"
+
+      - name: Siapkan Gradle
+        shell: bash
+        run: |
+          set -e
+          sudo apt-get update
+          sudo apt-get install -y gradle
+          cd "$PROJECT_DIR"
+          gradle wrapper --gradle-version 8.7
+          chmod +x gradlew
 
       - name: Bangun APK
         run: |
-          PROJECT="$(dirname "$(find upload -name settings.gradle -o -name settings.gradle.kts | head -n 1)")"
-          cd "$PROJECT"
-          gradle wrapper --gradle-version 8.7
-          chmod +x gradlew
-          ./gradlew assembleDebug
+          cd "$PROJECT_DIR"
+          ./gradlew assembleDebug --stacktrace
 
       - name: Simpan APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: Dikz-FastCharge-APK
           path: upload/**/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
